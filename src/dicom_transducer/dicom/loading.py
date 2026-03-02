@@ -1,3 +1,5 @@
+import os
+import queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -79,18 +81,62 @@ def actualize(
     """
     leaves = _collect_leaves(tree)
 
+    if max_workers is None:
+        effective_workers = min(32, (os.cpu_count() or 1) + 4)
+    else:
+        effective_workers = max_workers
+    effective_workers = min(effective_workers, len(leaves))
+
+    # Pool of tqdm bar positions available to worker threads.
+    # Position 0 is reserved for the directory bar; workers use 1..N.
+    positions: queue.SimpleQueue[int] = queue.SimpleQueue()
+    for i in range(1, effective_workers + 1):
+        positions.put(i)
+
+    def _load_with_progress(
+        key_path: tuple[str, ...],
+        paths: list[Path],
+    ) -> DicomVolume:
+        pos = positions.get()
+        try:
+            slices: list[np.ndarray] = []
+            first_ds: pydicom.Dataset | None = None
+            bar = tqdm(
+                total=len(paths),
+                desc=f"  {key_path[-1]}",
+                unit="slice",
+                position=pos,
+                leave=False,
+            )
+            for p in paths:
+                ds = pydicom.dcmread(p)
+                if first_ds is None:
+                    first_ds = ds
+                slices.append(
+                    pydicom.pixels.apply_modality_lut(ds.pixel_array, ds)
+                )
+                bar.update(1)
+            bar.close()
+            assert first_ds is not None
+            volume = np.stack(slices, axis=0)
+            metadata = _dataset_to_dict(first_ds)
+            return DicomVolume(volume=volume, metadata=metadata)
+        finally:
+            positions.put(pos)
+
     results: dict[tuple[str, ...], DicomVolume] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         future_to_key = {
-            executor.submit(load_dicom_directory, paths): key_path
+            executor.submit(_load_with_progress, key_path, paths): key_path
             for key_path, paths in leaves
         }
-        with tqdm(total=len(leaves), desc="Directories", unit="dir") as bar:
+        with tqdm(
+            total=len(leaves), desc="Directories", unit="dir", position=0
+        ) as dir_bar:
             for future in as_completed(future_to_key):
                 key_path = future_to_key[future]
                 results[key_path] = future.result()
-                bar.set_postfix_str(key_path[-1], refresh=False)
-                bar.update(1)
+                dir_bar.update(1)
 
     return _reassemble_tree(results)
 
