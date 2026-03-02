@@ -1,0 +1,37 @@
+[project]
+name = "dicom-transducer"
+version = "0.1.0"
+description = "Transduce photon counting CT data into a more compact zarr format."
+readme = "README.md"
+authors = [
+    { name = "stebix", email = "jannik.stebani@physik.uni-wuerzburg.de" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "attrs>=25.4.0",
+    "jaxtyping>=0.3.9",
+    "numpy>=2.4.2",
+    "pydicom>=3.0.1",
+    "pylibjpeg>=2.1.0",
+    "pylibjpeg-libjpeg>=2.3.0",
+    "tqdm>=4.67.3",
+    "zarr>=3.1.5",
+]
+
+[project.scripts]
+dicom-transducer = "dicom_transducer:main"
+
+[build-system]
+requires = ["uv_build>=0.10.6,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+analysis = [
+    "ipympl>=0.10.0",
+    "ipywidgets>=8.1.8",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+]
+dev = [
+    "ruff>=0.15.4",
+]
